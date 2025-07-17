@@ -25,6 +25,11 @@ else
     fi
 fi
 
+# Install torch
+pip install torch==2.7.1+cu126 torchvision==0.22.1+cu126 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cu126
+pip install xformers --index-url https://download.pytorch.org/whl/cu126
+
+
 # Install the repo
 echo "Installing the current repository..."
 pip install .
