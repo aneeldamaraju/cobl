@@ -91,18 +91,18 @@ class TemporalAttentionLayer(nn.Module):
         k = self.k_proj(kv)
         v = self.v_proj(kv)
 
-        q = rearrange(q, "bhw t (heads d) -> bhw heads t d", heads=self.n_heads)
-        k = rearrange(k, "bhw s (heads d) -> bhw heads s d", heads=self.n_heads)
-        v = rearrange(v, "bhw s (heads d) -> bhw heads s d", heads=self.n_heads)
-        out = F.scaled_dot_product_attention(q, k, v, mask)
-        out = rearrange(out, "bhw heads t d -> bhw t (heads d)")
+        # q = rearrange(q, "bhw t (heads d) -> bhw heads t d", heads=self.n_heads)
+        # k = rearrange(k, "bhw s (heads d) -> bhw heads s d", heads=self.n_heads)
+        # v = rearrange(v, "bhw s (heads d) -> bhw heads s d", heads=self.n_heads)
+        # out = F.scaled_dot_product_attention(q, k, v, mask)
+        # out = rearrange(out, "bhw heads t d -> bhw t (heads d)")
 
-        # # Apply xFormers memory-efficient attention
-        # q = rearrange(q, "bhw t (heads d) -> bhw t heads d", heads=self.n_heads)
-        # k = rearrange(k, "bhw s (heads d) -> bhw s heads d", heads=self.n_heads)
-        # v = rearrange(v, "bhw s (heads d) -> bhw s heads d", heads=self.n_heads)
-        # out = xformers.ops.memory_efficient_attention(q, k, v, attn_bias=mask)
-        # out = rearrange(out, "bhw t heads d -> bhw t (heads d)")
+        # Apply xFormers memory-efficient attention
+        q = rearrange(q, "bhw t (heads d) -> bhw t heads d", heads=self.n_heads)
+        k = rearrange(k, "bhw s (heads d) -> bhw s heads d", heads=self.n_heads)
+        v = rearrange(v, "bhw s (heads d) -> bhw s heads d", heads=self.n_heads)
+        out = xformers.ops.memory_efficient_attention(q, k, v, attn_bias=mask)
+        out = rearrange(out, "bhw t heads d -> bhw t (heads d)")
 
         out = self.o_proj(out)
         out = rearrange(out, "(b h w) t c -> (b t) c h w", b=b, h=h, w=w)
