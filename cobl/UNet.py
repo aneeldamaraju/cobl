@@ -12,6 +12,9 @@ from einops import rearrange, repeat
 
 import torch.nn as nn
 
+import xformers
+import xformers.ops
+
 
 def convert_module_to_f16(module):
     """
@@ -216,58 +219,6 @@ class TimestepEmbedSequential(nn.Sequential, TimestepBlock):
             else:
                 x = layer(x)
         return x
-
-
-class MaskModel(nn.Sequential):
-    def __init__(
-        self,
-        model_channels,
-        ch,
-        out_channels,
-        time_embed_dim,
-        chdim=32,
-        dropout=0.0,
-        depth=2,
-        use_checkpoint=False,
-    ):
-        super().__init__()
-        self.model_channels = model_channels
-        time_embed_dim = model_channels * 4
-        self.time_embed = nn.Sequential(
-            linear(model_channels, time_embed_dim),
-            nn.SiLU(),
-            linear(time_embed_dim, time_embed_dim),
-        )
-
-        blocks = [conv_nd(2, ch, chdim, 3, padding=1)]
-        for i in range(depth):
-            blocks.append(
-                ResBlock(
-                    chdim,
-                    out_channels=chdim,
-                    emb_channels=time_embed_dim,
-                    dropout=dropout,
-                    use_checkpoint=use_checkpoint,
-                )
-            )
-        self.blocks = TimestepEmbedSequential(*blocks)
-
-        self.out = nn.Sequential(
-            nn.Conv2d(
-                in_channels=chdim,
-                out_channels=out_channels,
-                kernel_size=1,
-                bias=True,
-            ),
-            nn.Sigmoid(),
-        )
-
-    def forward(self, x, timesteps=None, **kwargs):
-        # x passed in as [B, N*D, H, W]
-        t_emb = timestep_embedding(timesteps, self.model_channels, repeat_only=False)
-        emb = self.time_embed(t_emb)
-        x = self.blocks(x, emb, None, None)
-        return self.out(x)
 
 
 class UNetModel(nn.Module):

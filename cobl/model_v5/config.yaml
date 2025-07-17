@@ -36,7 +36,7 @@ model:
       params:
         n_frames: 7
         n_temp_heads: 8
-        use_checkpoint: False
+        use_checkpoint: True
         use_fp16: False
         in_channels: 4
         out_channels: 4

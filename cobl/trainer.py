@@ -13,6 +13,7 @@ from torch.utils.data._utils.collate import default_collate
 from cobl import reverse_transform, DDIM_Sampler
 from .load_utils import *
 from .datasets import CObL_collate
+from .load_utils import to_cobl_path
 
 
 def initialize_training(
@@ -130,6 +131,7 @@ class Trainer:
             collate_fn=CObL_collate,
         )
 
+        ckpt_path = to_cobl_path(ckpt_path)
         self.ckpt_path = ckpt_path
         self.max_epochs = max_steps
         self.lr = lr
