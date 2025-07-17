@@ -1,0 +1,131 @@
+model:
+  target: cobl.ddpm.LatentDiffusion
+  params:
+    # GaussianDiffusion Params
+    noise_channels: 28 # (z=4) x (Nlayers=7)
+    target_key: "layers"
+    text_key: "caption"
+    cond_key: "scene"
+    use_text: True
+    use_cond: True
+    cfg_dropout: 0.10
+    timesteps: 1000
+    beta_schedule: "quadratic" # same as Ho linear
+    linear_start: 0.00085
+    linear_end: 0.0120
+    unet_trainable: True
+    text_stage_trainable: False
+    cond_stage_trainable: True
+    use_fp16: False
+    prediction_type: "epsilon"
+    variance_type: "fixed_small"
+    kmin_snr: 5.0
+    use_min_snr: True
+    use_depth: True
+    # LatentDiffusion params
+    default_latent_scale: 0.18215
+    scale_from_first_batch: False
+    batch_encode: 1
+    embed_cond: False
+
+    ##################################################################
+    unet_config:
+      target: cobl.UNet.UNetModel
+      ckpt_path: "cobl/LDM/SD2p1/v2-1_512-ema-pruned.ckpt"
+      ckpt_strip: "model.diffusion_model."
+      params:
+        n_frames: 7
+        n_temp_heads: 8
+        use_checkpoint: False
+        use_fp16: False
+        in_channels: 4
+        out_channels: 4
+        model_channels: 320
+        attention_resolutions: [4, 2, 1]
+        num_res_blocks: 2
+        channel_mult: [1, 2, 4, 4]
+        num_head_channels: 64 # need to fix for flash-attn
+        use_spatial_transformer: True
+        use_linear_in_transformer: True
+        transformer_depth: 1
+        context_dim: 1024
+        use_conv3d: True
+
+    # Always refers to our text conditioning
+    text_stage_config:
+      target: cobl.LDM.encoders.FrozenOpenCLIPEmbedder
+      ckpt_path: "cobl/LDM/SD2p1/v2-1_512-ema-pruned.ckpt"
+      ckpt_strip: "cond_stage_model."
+      params:
+        freeze: True
+        layer: "penultimate"
+
+    cond_stage_config:
+      target: diffusers.models.adapter.T2IAdapter
+      ckpt_path: "None"
+      ckpt_strip: ""
+      params:
+        in_channels: 3
+
+    depth_stage_config:
+      target: diffusers.models.adapter.T2IAdapter
+      ckpt_path: "None"
+      ckpt_strip: ""
+      params:
+        in_channels: 1
+
+    # Refers to the pretrained autoencoder
+    first_stage_config: # Reduces spatial dimension by factor 8
+      target: cobl.LDM.autoencoder.AutoencoderKL
+      ckpt_path: "cobl/LDM/SD2p1/v2-1_512-ema-pruned.ckpt"
+      ckpt_strip: "first_stage_model."
+      params:
+        embed_dim: 4
+        monitor: val/rec_loss
+        ddconfig:
+          #attn_type: "vanilla-xformers"
+          double_z: true
+          z_channels: 4
+          resolution: 256
+          in_channels: 3
+          out_ch: 3
+          ch: 128
+          ch_mult:
+            - 1
+            - 2
+            - 4
+            - 4
+          num_res_blocks: 2
+          attn_resolutions: []
+          dropout: 0.0
+        lossconfig:
+          target: torch.nn.Identity
+
+train_dataset:
+  target: cobl.datasets.synthetic_layering_latent_v2
+  params:
+    root_dir: "cobl/synthetic_dataset_encoded/"
+    dtype: "float32"
+    NLayer: 7
+    use_aug: False
+    horizontal_fp: 0.0
+    vertical_fp: 0.0
+    preload: True
+
+trainer:
+  target: cobl.trainer.Trainer_with_plotting
+  params:
+    ckpt_to_find_missing_params: "cobl/LDM/SD2p1/v2-1_512-ema-pruned.ckpt"
+    ckpt_path: "cobl/model_v5/"
+    preencoded: True
+    batch_size: 2
+    max_steps: 160
+    lr: 1e-4
+    gradient_accumulation_steps: 1
+    snapshot_every_n: 1
+    sample_img_size: [64, 64]
+    disp_num_samples: 2
+    train_valid_split: 0.90
+    dl_workers: 1
+    dl_pin_mem: true
+    unfreeze_unet: False
