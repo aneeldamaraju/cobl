@@ -32,4 +32,4 @@ pip install xformers --index-url https://download.pytorch.org/whl/cu126
 
 # Install the repo
 echo "Installing the current repository..."
-pip install .
+pip install -e .
