@@ -44,6 +44,7 @@ def initialize_diffusion_model(
     # This can override all other ckpt load statements which may be empty
     # Generally use this to load a custom saved checkpoint all at once after training
     if ckpt_path is not None:
+        ckpt_path = to_cobl_path(ckpt_path)
         print(f"Loading from checkpoint {ckpt_path}")
         sd = torch.load(ckpt_path, map_location="cpu", weights_only=False)["state_dict"]
         missing, unexpected = diffusion_model.load_state_dict(sd, strict=False)
@@ -88,3 +89,54 @@ def get_obj_from_str(string, reload=False):
         importlib.reload(module_imp)
 
     return getattr(importlib.import_module(module, package=None), cls)
+
+
+def replace_prefixes(state_dict, mapping):
+    new_state_dict = {}
+    for k, v in state_dict.items():
+        new_key = k
+        for old_prefix, new_prefix in mapping.items():
+            if k.startswith(old_prefix):
+                new_key = new_prefix + k[len(old_prefix) :]
+                break  # only apply the first matching prefix
+        new_state_dict[new_key] = v
+    return new_state_dict
+
+
+def extract_missing_checkpoint_params(ref_ckpt_path, new_ckpt_path, save_path=None):
+    prefix_mapping = {
+        "model.diffusion_model.": "model.",
+        "cond_stage_model.model.": "text_stage_model.model.",
+    }
+
+    ref_ckpt_path = to_cobl_path(ref_ckpt_path)
+    new_ckpt_path = to_cobl_path(new_ckpt_path)
+    save_path = to_cobl_path(save_path)
+
+    # Load reference checkpoint and apply prefix mapping
+    ref_ckpt = torch.load(ref_ckpt_path, map_location="cpu")
+    if "state_dict" in ref_ckpt:
+        ref_state_dict = replace_prefixes(ref_ckpt["state_dict"], prefix_mapping)
+    else:
+        ref_state_dict = replace_prefixes(ref_ckpt, prefix_mapping)
+
+    # Load new checkpoint
+    new_ckpt = torch.load(new_ckpt_path, map_location="cpu")
+    new_state_dict = new_ckpt["state_dict"] if "state_dict" in new_ckpt else new_ckpt
+
+    # Find missing keys
+    ref_keys = set(ref_state_dict.keys())
+    new_keys = set(new_state_dict.keys())
+    missing_keys = new_keys - ref_keys
+
+    print(f"\nFound {len(missing_keys)} parameters in new checkpoint not in reference:")
+    for k in sorted(missing_keys):
+        print(k)
+
+    # Save if requested
+    if save_path:
+        missing_state_dict = {k: new_state_dict[k] for k in missing_keys}
+        torch.save({"state_dict": missing_state_dict}, save_path)
+        print(f"\nSaved missing parameters to: {save_path}")
+
+    return missing_keys
