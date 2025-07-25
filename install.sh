@@ -28,7 +28,7 @@ mkdir -p "$TARGET_DIR"
 if [ -f "$CKPT_PATH" ]; then
     echo "Checkpoint already exists at $CKPT_PATH. Skipping download."
 else
-    echo "Downloading Stable Diffusion checkpoint..."
+    echo "Downloading Cobl checkpoint..."
     curl -L "$CKPT_URL" -o "$CKPT_PATH"
     if [ -f "$CKPT_PATH" ]; then
         echo "Checkpoint successfully downloaded to $CKPT_PATH"
@@ -37,6 +37,26 @@ else
         exit 1
     fi
 fi
+
+# Download the U2Net checkpoint
+CKPT_URL="https://www.dropbox.com/scl/fi/obpwapfgjl6gwmmwpc1le/u2net.pth?rlkey=0q0dqx17fk9yve3ve98ws9zy9&st=z6uuzf1c&dl=1"
+CKPT_NAME="u2net.pth"
+TARGET_DIR="./U2Net/"
+CKPT_PATH="$TARGET_DIR/$CKPT_NAME"
+mkdir -p "$TARGET_DIR"
+if [ -f "$CKPT_PATH" ]; then
+    echo "Checkpoint already exists at $CKPT_PATH. Skipping download."
+else
+    echo "Downloading U2Net checkpoint..."
+    curl -L "$CKPT_URL" -o "$CKPT_PATH"
+    if [ -f "$CKPT_PATH" ]; then
+        echo "Checkpoint successfully downloaded to $CKPT_PATH"
+    else
+        echo "Download failed!"
+        exit 1
+    fi
+fi
+
 
 
 # Install torch

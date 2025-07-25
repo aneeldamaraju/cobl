@@ -4,3 +4,4 @@
 **model_snapshots/**
 **train_logs/**
 **.ckpt
+**.pth
