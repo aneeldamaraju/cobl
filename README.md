@@ -1,5 +1,5 @@
-# cobl
-Implementation of the ICCV 2025 Paper: CObL: Toward Zero-Shot Ordinal Layering without User Prompting
+# CObL: Toward Zero-Shot Ordinal Layering without User Prompting
+Official Implementation of the ICCV 2025 Paper: CObL: Toward Zero-Shot Ordinal Layering without User Prompting
 
 ## Installation
 To run this code, clone and install via:
