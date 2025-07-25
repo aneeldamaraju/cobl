@@ -20,7 +20,7 @@ else
 fi
 
 # Download the Cobl parameters
-CKPT_URL="https://www.dropbox.com/scl/fi/uydfvprortr89mt7n76xn/cobl_added_params.ckpt?rlkey=v9ys60vlqso64f3xysxsfxvsz&st=fbhcrcwt&dl=1"
+CKPT_URL = "https://www.dropbox.com/scl/fi/cirx1dh4hst6ar3o2w33h/cobl_add_params.ckpt?rlkey=2p9lqvqz9ae0djg9uthtari3p&st=5zflon96&dl=1"
 CKPT_NAME="cobl_added_params.ckpt"
 TARGET_DIR="./cobl/model_v5/"
 CKPT_PATH="$TARGET_DIR/$CKPT_NAME"
@@ -41,7 +41,7 @@ fi
 # Download the U2Net checkpoint
 CKPT_URL="https://www.dropbox.com/scl/fi/obpwapfgjl6gwmmwpc1le/u2net.pth?rlkey=0q0dqx17fk9yve3ve98ws9zy9&st=z6uuzf1c&dl=1"
 CKPT_NAME="u2net.pth"
-TARGET_DIR="./U2Net/"
+TARGET_DIR="./cobl/U2Net/"
 CKPT_PATH="$TARGET_DIR/$CKPT_NAME"
 mkdir -p "$TARGET_DIR"
 if [ -f "$CKPT_PATH" ]; then

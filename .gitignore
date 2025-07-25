@@ -5,3 +5,4 @@
 **train_logs/**
 **.ckpt
 **.pth
+**.h5

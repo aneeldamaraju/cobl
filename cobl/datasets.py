@@ -12,6 +12,22 @@ import torch.nn.functional as F
 from .load_utils import to_cobl_path
 
 
+class CenterSquareCrop:
+    def __call__(self, img):
+        """
+        Center crops the image to the smallest side length to make it square.
+
+        Args:
+            img (PIL.Image.Image): The input image.
+
+        Returns:
+            PIL.Image.Image: The center-cropped square image.
+        """
+        c, h, w = img.shape
+        min_dim = min(w, h)
+        return transforms.CenterCrop(min_dim)(img)
+
+
 class GroupTransforms:
     def __call__(self, sample):
         raise NotImplementedError("This method should be overridden in subclasses")

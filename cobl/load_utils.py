@@ -114,14 +114,14 @@ def extract_missing_checkpoint_params(ref_ckpt_path, new_ckpt_path, save_path=No
     save_path = to_cobl_path(save_path)
 
     # Load reference checkpoint and apply prefix mapping
-    ref_ckpt = torch.load(ref_ckpt_path, map_location="cpu")
+    ref_ckpt = torch.load(ref_ckpt_path, map_location="cpu", weights_only=False)
     if "state_dict" in ref_ckpt:
         ref_state_dict = replace_prefixes(ref_ckpt["state_dict"], prefix_mapping)
     else:
         ref_state_dict = replace_prefixes(ref_ckpt, prefix_mapping)
 
     # Load new checkpoint
-    new_ckpt = torch.load(new_ckpt_path, map_location="cpu")
+    new_ckpt = torch.load(new_ckpt_path, map_location="cpu", weights_only=False)
     new_state_dict = new_ckpt["state_dict"] if "state_dict" in new_ckpt else new_ckpt
 
     # Find missing keys
@@ -129,9 +129,9 @@ def extract_missing_checkpoint_params(ref_ckpt_path, new_ckpt_path, save_path=No
     new_keys = set(new_state_dict.keys())
     missing_keys = new_keys - ref_keys
 
-    print(f"\nFound {len(missing_keys)} parameters in new checkpoint not in reference:")
-    for k in sorted(missing_keys):
-        print(k)
+    # print(f"\nFound {len(missing_keys)} parameters in new checkpoint not in reference:")
+    # for k in sorted(missing_keys):
+    #     print(k)
 
     # Save if requested
     if save_path:
