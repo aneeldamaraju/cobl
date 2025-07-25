@@ -20,7 +20,7 @@ else
 fi
 
 # Download the Cobl parameters
-CKPT_URL = "https://www.dropbox.com/scl/fi/cirx1dh4hst6ar3o2w33h/cobl_add_params.ckpt?rlkey=2p9lqvqz9ae0djg9uthtari3p&st=5zflon96&dl=1"
+CKPT_URL="https://www.dropbox.com/scl/fi/cirx1dh4hst6ar3o2w33h/cobl_added_params.ckpt?rlkey=2p9lqvqz9ae0djg9uthtari3p&st=sq05l8kn&dl=1"
 CKPT_NAME="cobl_added_params.ckpt"
 TARGET_DIR="./cobl/model_v5/"
 CKPT_PATH="$TARGET_DIR/$CKPT_NAME"
