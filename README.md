@@ -7,7 +7,7 @@ To run this code, clone and install via:
 git clone COBL_PUBLIC_PATH
 ./install.sh
 ```
-You may need to edit the torch and xformers settings in the install file to match your own CUDA version. This default file uses CUDA 12.6 and Pytorch 2.7.1
+You may need to edit the torch and xformers settings in the install file to match your own CUDA version. This default file uses CUDA 12.6 and Pytorch 2.7.1, Python 3.10.13
 
 
 ## TableTop Real - 20 testing Subset
