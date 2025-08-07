@@ -1,6 +1,6 @@
 # CObL: Toward Zero-Shot Ordinal Layering without User Prompting (ICCV 2025 Highlight)
 
-Helpful links: [\[Project Page\]]([http://example.com](https://vision.seas.harvard.edu/cobl/)) [\[PDF\]]() [\[ArXiv\]]()
+Helpful links: [\[Project Page\]](https://vision.seas.harvard.edu/cobl/)) [\[PDF\]]() [\[ArXiv\]]()
 
 Teaser
 
