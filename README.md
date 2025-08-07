@@ -1,5 +1,8 @@
-# CObL: Toward Zero-Shot Ordinal Layering without User Prompting
-Official Implementation of the ICCV 2025 Paper: CObL: Toward Zero-Shot Ordinal Layering without User Prompting
+# CObL: Toward Zero-Shot Ordinal Layering without User Prompting (ICCV 2025 Highlight)
+
+Helpful links: [\[Project Page\]]([http://example.com](https://vision.seas.harvard.edu/cobl/)) [\[PDF\]]() [\[ArXiv\]]()
+
+Teaser
 
 ## Installation
 To run this code, clone and install via:
