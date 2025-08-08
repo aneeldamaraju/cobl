@@ -29,3 +29,17 @@ sample = cobl['test'][0]
 ```
 
 ## TableTop Synthetic - Training Subset
+
+
+## Citation
+
+If you find this repo useful, please consider citing:
+
+```bibtex
+@article{damaraju2025cobl,
+      author    = {Damaraju, Aneel and Hazineh, Dean and Zickler, Todd},
+      title     = {CObL: Toward Zero-Shot Ordinal Layering without User Prompting},
+      journal   = {ICCV},
+      year      = {2025},
+    }
+```
