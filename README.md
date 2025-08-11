@@ -2,7 +2,7 @@
 
 Helpful links: [\[Project Page\]](https://vision.seas.harvard.edu/cobl/) [\[PDF\]]() [\[ArXiv\]]()
 
-Teaser
+![Teaser](media/cobl-applications.png)
 
 ## Installation
 To run this code, clone and install via:
