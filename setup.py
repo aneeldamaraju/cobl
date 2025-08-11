@@ -20,6 +20,7 @@ setup(
         "numpy==1.26.4",
         "omegaconf==2.3.0",
         "open_clip_torch==2.32.0",
+        "opencv-python==4.9.0.80",
         "pillow==11.3.0",
         "pytorch-lightning==2.5.2",
         "requests==2.32.4",

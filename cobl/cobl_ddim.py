@@ -8,6 +8,7 @@ from copy import deepcopy
 import torch.nn.functional as F
 import torchvision.transforms as T
 import matplotlib.pyplot as plt
+from itertools import permutations
 
 from cobl.ddpm_utils import extract
 from cobl.midas import MidasDepthEstimator
@@ -16,8 +17,6 @@ from cobl.load_utils import to_cobl_path
 from cobl.U2Net.u2net_utils import load_mask_net, u2net_masks
 
 
-def split_layers(x0):
-    return rearrange(x0, "b v h w (n c) -> b v n h w c", c=3)  # [B, V, 7, 3, 512, 512]
 
 
 def composite_imgs(imgs, masks):
@@ -28,20 +27,102 @@ def composite_imgs(imgs, masks):
 
 
 def calc_composite_loss(
-    pred_layers, mask_pred, cond, shadow_invariant=False, use_ordinal_scale=False
+    pred_layers, mask_pred, cond
 ):
     composite = composite_imgs(pred_layers, mask_pred[:-1])
-    composite_target = cond
-    if not shadow_invariant:
-        composite_loss = torch.mean((composite[0] - composite_target) ** 2)
-    else:
-        composite_inv = composite / (torch.sum(composite, dim=-3, keepdim=True) + 1e-4)
-        target_inv = composite_target / (
-            torch.sum(composite_target, dim=-3, keepdim=True) + 1e-4
-        )
-        composite_loss = torch.mean((composite_inv[0, :2] - target_inv[:2]) ** 2)
+    composite_loss = torch.mean((composite[0] - cond) ** 2)
     return composite, composite_loss
 
+
+def calc_psm_loss(dm,x0_raw,epsilon,x_t,t,ti,uc_text_embd,xcond_embd,unet_clone):
+    with torch.no_grad():
+        renoised_xt = dm.q_sample(x0_raw, ti)
+        renoised_xt = renoised_xt.to(x_t.dtype)
+        uc_text_embd = repeat(
+            uc_text_embd.to(torch.float16),
+            "b s c -> (b g) s c",
+            g=xcond_embd.shape[0],
+        )
+        eps_uc = unet_clone(renoised_xt, t, uc_text_embd)
+    sds_loss = torch.mean((epsilon - eps_uc) ** 2)
+    return sds_loss
+
+### Non differentiable cleaning steps (see supplemental)
+def permute_and_clean(t, ti, mask_pred, x0, sample_cond,nlayers):
+    t_flat = t.flatten()[0]
+    if (ti+1)%5==0:
+        permuted_idxs = get_best_permutation(mask_pred, x0, sample_cond, num_idxs=nlayers-1)
+        idxs_to_remove = []
+    elif (ti+2)%5==0:
+        permuted_idxs, idxs_to_remove =  clean_and_sort_masks(mask_pred)
+    else:
+        permuted_idxs = False
+        idxs_to_remove = []
+        
+    return permuted_idxs,idxs_to_remove
+        
+
+def get_best_permutation(masks,predictions,cond, num_idxs = 3):
+    masks = masks[:masks.shape[0]-1,0,...].to(predictions.device)
+    permuted_idxs = list(permutations(range(num_idxs)))
+    permuted_idxs_with_bgs = [list(idx)+[num_idxs] for idx in permuted_idxs]
+    composite_target = cond.to(predictions.device).squeeze().unsqueeze(0)
+    best_permutation = permuted_idxs_with_bgs[0]
+    lowest_loss = 1
+
+    with torch.no_grad():
+        for idxs in permuted_idxs_with_bgs:
+
+            permuted_imgs = predictions[idxs,...]
+            permuted_composite = composite_imgs(permuted_imgs,masks[idxs[:num_idxs],...])
+            composite_loss = F.mse_loss(permuted_composite,composite_target)
+            if (composite_loss.item() < lowest_loss):
+                best_permutation = idxs
+                lowest_loss = composite_loss.item()
+                
+    return best_permutation
+
+    
+def move_empty_masks_to_front(mask_pred,thresh=.8):
+    empty_mask_idxs = []
+    unempty_mask_idxs = []
+    
+    for itr,mask in enumerate(mask_pred[:-1]):
+        empty_el = torch.sum(mask<thresh)
+        if (empty_el/torch.numel(mask)) > 1-1e-3:
+            empty_mask_idxs.append(itr)
+        else:
+            unempty_mask_idxs.append(itr)
+    return empty_mask_idxs+unempty_mask_idxs+[itr+1]
+    
+    
+def masks_to_remove(mask_imgs,composite_out,thresh=.8):
+    occluded_mask_idxs = []
+    for itr, (mask,composite) in enumerate(zip(mask_imgs[1:], composite_out[:-1])):
+        intersection = torch.count_nonzero((mask>thresh)*(composite>thresh))
+        occlusion_frac = intersection/(torch.sum(mask>thresh) + 1e-5)
+        if occlusion_frac > 1-1e-1:
+            occluded_mask_idxs.append(itr+1)
+    return occluded_mask_idxs
+    
+def composite_masks(masks):
+    #intialize background and outputs
+    composite_list = []
+    composite_out = masks[0]
+    composite_list.append(composite_out)
+    for mask in masks[1:]:
+        composite_out = mask + composite_out * (1-mask)
+        composite_list.append(composite_out)
+    return composite_list
+
+def clean_and_sort_masks(mask_pred):
+    mask_pred = mask_pred.squeeze()
+    permuted_idxs = move_empty_masks_to_front(mask_pred)
+    composite_list = composite_masks(mask_pred[:-1])
+    idxs_to_remove = masks_to_remove(mask_pred[:-1],composite_list)
+    return permuted_idxs, idxs_to_remove
+
+###
 
 def permute(x):
     return x.transpose(-3, -1).transpose(-3, -2)
@@ -50,13 +131,14 @@ def permute(x):
 class loss_logger:
     def __init__(self):
         self.composite_loss = []
-        self.sds_loss = []
+        self.psm_loss = []
         self.total_loss = []
-
+        self.masks = []
 
 class DDIM_Sampler(nn.Module):
     def __init__(
-        self, diffusion_model, n_steps, ddim_scheme="uniform", ddim_eta=0, cfg_scale=1.0
+        self, diffusion_model, n_steps, ddim_scheme="uniform", ddim_eta=0, cfg_scale=1.75,
+        psm_weighting = 1e-6, guidance_weight=1.0,
     ):
         super().__init__()
         self.diffusion_model = diffusion_model.to("cuda")
@@ -86,8 +168,8 @@ class DDIM_Sampler(nn.Module):
         self.ldm = diffusion_model.is_ldm
         self.use_guidance = False
         self.cfg_scale = torch.tensor(cfg_scale, device="cuda")
-        self.sds_weighting = 0.0
-        self.guidance_weight = 0.0
+        self.psm_weighting = psm_weighting
+        self.guidance_weight = guidance_weight
         self.scene = None
         self.transform = T.Compose(
             [
@@ -104,7 +186,7 @@ class DDIM_Sampler(nn.Module):
         self.scale = self.diffusion_model.scale_factor
 
     def guidance_call(self, x_t, t, ti, xcond_embd, ccond_embd):
-        return x_t, None
+        return  x+T, permutation_order, idxs_to_remove
 
     def p_sample(self, x_t, t, ti, xcond_embd, ccond_embd):
         ### Get Noise while using CFG
@@ -115,13 +197,24 @@ class DDIM_Sampler(nn.Module):
 
         ### Run Guidance
         if self.use_guidance:
-            x_t, permuted_idxs = self.guidance_call(x_t, t, ti, xcond_embd, ccond_embd)
-            x_t = self._permute_idxs(x_t, permuted_idxs)
-            epsilon = self._permute_idxs(epsilon, permuted_idxs)
+            xtp,permutation_order, idxs_to_remove = self.guidance_call(x_t, t, ti, xcond_embd, ccond_embd)
+        
+            # x_t = self._permute_idxs(x_t, permuted_idxs)
+            # epsilon = self._permute_idxs(epsilon, permuted_idxs)
 
         ### Get x0hat and Compute DDIM Step
         pred_xstart = self._get_x0(x_t, epsilon, t, ti)
         xtm1 = self._get_xtm1(pred_xstart, epsilon, t, ti)
+        
+        
+        if self.use_guidance:
+            nlayers = int(pred_xstart.shape[1]/4)
+            pred_xstart = self._permute_idxs(pred_xstart, permutation_order,nlayers)
+            pred_xstart = self._remove_latents(pred_xstart, idxs_to_remove,ti,nlayers)
+
+            xtm1 = self._permute_idxs(xtm1, permutation_order,nlayers)
+            xtm1 = self._remove_latents(xtm1, idxs_to_remove,ti,nlayers)
+        
         return xtm1, pred_xstart
 
     def p_sample_loop(
@@ -174,16 +267,16 @@ class DDIM_Sampler(nn.Module):
         cond=None,
         use_guidance=False,
         guidance_weight=None,
-        sds_weighting=None,
+        psm_weighting=None,
         cfg_scale=None,
     ):
-
+        
         # Update the sampling parameters
         self.use_guidance = use_guidance
         if guidance_weight is not None:
             self.guidance_weight = guidance_weight
-        if sds_weighting is not None:
-            self.sds_weighting = sds_weighting
+        if psm_weighting is not None:
+            self.psm_weighting = psm_weighting
         if cfg_scale is not None:
             self.cfg_scale = cfg_scale
 
@@ -203,6 +296,7 @@ class DDIM_Sampler(nn.Module):
         self.decoder.to(self.decode_dtype)
 
         scene, cond, depth = self.condition_transform(cond)
+        self.sample_cond = cond
         self.scene = scene.to(dtype=dtype, device=device)
 
         if x_start is None:
@@ -215,7 +309,7 @@ class DDIM_Sampler(nn.Module):
             x_start = x_start.to(dtype=dtype, device=device)
 
         if dm._use_cond:
-            print("Using Cond")
+            # print("Using Cond")
             cond = cond.to(dtype=dtype, device=device)
             cond = dm.cond_stage_model(cond)
 
@@ -224,10 +318,10 @@ class DDIM_Sampler(nn.Module):
             depth = dm.depth_stage_model(depth)
             assert len(cond) == len(depth), "Unexpected exception."
             cond = [cond, depth]
-            print("Depth features added to cond")
+            # print("Depth features added to cond")
 
         if dm._use_text:
-            print("Using Text")
+            # print("Using Text")
             assert (
                 text_cond is not None
             ), "Model uses text conditioning but none is given"
@@ -343,26 +437,47 @@ class DDIM_Sampler(nn.Module):
         self.sqrt_recip_alphas_cumprod = torch.sqrt(1.0 / alphas_cumprod)
         self.ddim_coeff = torch.sqrt(1 - alphas_cumprod_prev - ddim_sigma**2)
         return
-
+    
     @torch.no_grad()
-    def _permute_idxs(self, x, permuted_idxs):
-        if permuted_idxs is None:
+    def _permute_idxs(self,x,permuted_idxs,nlayers):
+        '''
+        Permute dimensions of x according to permuted_idxs 
+        Given input x, rearranges and returns a new x
+        '''
+        if permuted_idxs:
+            dm = self.diffusion_model
+            x_rearr = rearrange(x,'b (n c) h w -> b n c h w', n = nlayers)
+            x_rearr = x_rearr[:,permuted_idxs, ...]
+            return rearrange(x_rearr, 'b n c h w -> b (n c) h w',n=nlayers)
+        else:
             return x
-        order = list(permuted_idxs)
-        x_rearr = rearrange(x, "b (n c) h w -> b n c h w", n=7)
-        x_rearr = x_rearr[:, order]
-        return rearrange(x_rearr, "b n c h w -> b (n c) h w", n=7)
-
+    
+    @torch.no_grad()
+    def _remove_latents(self,x,idxs_to_remove, ti, nlayers, zero=True):
+        '''
+        Remove selected latents and replace them with either zeros or a designated empty image latent
+        Given input x, removes, rearranges and returns a new x
+        '''
+        dm = self.diffusion_model
+        x_rearr = rearrange(x,'b (n c) h w -> b n c h w', n = nlayers)
+        if zero:
+            replacement_tensor = torch.zeros_like(x_rearr[:,0,...])
+        else:
+            replacement_tensor = dm.q_sample(self.empty_image_latent, ti)
+        x_rearr[:,idxs_to_remove, ...] = replacement_tensor
+        return rearrange(x_rearr, 'b n c h w -> b (n c) h w',n=nlayers)
 
 class Guided_Layer_Sampler(DDIM_Sampler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.logger = loss_logger()
-
+        self.sd_sampler = DDIM_Sampler(self.diffusion_model, self.n_steps)
+        dtype = torch.float16
+        
+          
         u2net_ckpt = to_cobl_path("cobl/U2Net/u2net.pth")
         self.u2net = load_mask_net(u2net_ckpt)
-
-        # Make a unet clone for SDS
+        
         self.unet_clone = deepcopy(self.diffusion_model.model)
         with torch.no_grad():
             for name, param in self.unet_clone.named_parameters():
@@ -373,9 +488,11 @@ class Guided_Layer_Sampler(DDIM_Sampler):
         self.unet_clone.dtype = torch.float16
         self.unet_clone.convert_to_fp16()
 
-        self.shadow_norm = True
+    
 
+    
     def guidance_call(self, x_t, t, ti, xcond_embd, ccond_embd):
+        nlayers = int(x_t.shape[1]/4) # TODO: remove dynamically allocate n_layers
         xtp = x_t.clone()
         xtp.requires_grad_(True)
         xc = xcond_embd.clone()
@@ -398,91 +515,35 @@ class Guided_Layer_Sampler(DDIM_Sampler):
         # Compute composition loss
         mask_pred = u2net_masks(x0, self.u2net).to(dtype=x0.dtype, device=x0.device)
         _, composite_loss = calc_composite_loss(
-            x0, mask_pred, self.scene, self.shadow_norm
+            x0, mask_pred, self.scene
         )
+        self.logger.masks.append(mask_pred.cpu().detach().squeeze().numpy())
         comp_lval = composite_loss.item()
         self.logger.composite_loss.append(comp_lval)
-
-        # print(mask_pred.shape, x0.shape)
-        # fig, ax = plt.subplots(2, 7, figsize=(3 * 7, 3 * 2))
-        # for i in range(7):
-        #     ax[0, i].imshow(permute(x0[i]).detach().cpu().numpy().astype(np.float32))
-        #     ax[1, i].imshow(permute(mask_pred[i]).cpu().numpy().astype(np.float32))
-
-        # for axi in ax.flatten():
-        #     axi.axis("off")
-        # plt.tight_layout()
-
-        # composite_out = x0[-1]
-        # for img, mask in reversed(list(zip(x0[:-1], mask_pred))):
-        # #for img, mask in list(zip(x0[:-1], mask_pred)):
-        #     composite_out = img * mask + composite_out * (1 - mask)
-        #     fig, ax = plt.subplots(1,3)
-        #     ax[0].imshow(permute(img).detach().cpu().numpy().astype(np.float32))
-        #     ax[1].imshow(permute(mask).detach().cpu().numpy().astype(np.float32))
-        #     ax[2].imshow(permute(composite_out).detach().cpu().numpy().astype(np.float32))
-
-        #     plt.tight_layout()
-
-        # # Get permutation order based on layer, mask_pred, and computed depth
-        # with torch.no_grad():
-        #     isolated_layers = x0[:-1] * mask_pred[:-1] + (1-mask_pred[:-1]) * x0[-1:]
-        #     depth = torch.zeros((6,1,512,512), dtype=torch.float16, device='cuda')
-        #     for i in range(6):
-        #         _, _, depth_est = self.condition_transform(isolated_layers[i], already_tensor=True)
-        #         depth[i] = depth_est
-
-        #     masked_depth = depth * mask_pred[:-1]
-        #     max_depth = torch.amax(masked_depth, dim=(-1,-2, -3)).flatten()
-        #     max_depth = torch.round(max_depth * 100) / 100
-        #     max_depth = torch.where(max_depth==0.00, torch.ones_like(max_depth)*1.1, max_depth)
-
-        #     fig, ax = plt.subplots(2,6)
-        #     for i in range(6):
-        #         ax[0, i].imshow(permute(isolated_layers[i]).cpu().numpy().astype(np.float32))
-        #         ax[1, i].imshow(permute(depth[i]).cpu().numpy().astype(np.float32))
-        #         ax[1, i].set_title(np.round(max_depth[i].item(), 2))
-
-        #     if t[0] <= 600:
-        #         permutation_order = torch.argsort(max_depth, dim=0)  # ascending order by default
-        #         permutation_order = permutation_order.squeeze().cpu().numpy()[::-1]
-        #     else:
-        #         permutation_order = None
-        # permutation_order = None
-
-        # with torch.no_grad():
-        #     permutation_order = get_best_permutation(mask_pred, x0, self.scene, num_idxs=6)
-        #     if permutation_order == list(range(7)):
-        #         permutation_order = None
-        #     print(permutation_order)
-        permutation_order = None
-
-        # Compute SDS Loss
-        with torch.no_grad():
-            renoised_xt = self.diffusion_model.q_sample(x0_raw, ti)
-            renoised_xt = renoised_xt.to(x_t.dtype)
-            uc_text_embd = repeat(
-                self.uc_text_embd.to(torch.float16),
-                "b s c -> (b g) s c",
-                g=xcond_embd.shape[0],
-            )
-            eps_uc = self.unet_clone(renoised_xt, t, uc_text_embd, ccond_embd)
-        sds_loss = torch.mean((epsilon - eps_uc) ** 2)
-        sds_lval = self.sds_weighting * sds_loss.item()
-        self.logger.sds_loss.append(sds_lval)
+        
+        # Compute PSM Loss
+        # psm_loss = calc_psm_loss(x0_raw,t,ti,self.sd_sampler,self.uc_text_embd)
+        psm_loss = calc_psm_loss(self.diffusion_model,x0_raw,epsilon,xtp,t,ti,self.uc_text_embd,xcond_embd,self.unet_clone)
+        psm_lval = self.psm_weighting * psm_loss.item()
+        self.logger.psm_loss.append(psm_lval)
 
         ### Gradient Update
-        total_loss = composite_loss + self.sds_weighting * sds_loss
+        total_loss = composite_loss + self.psm_weighting * psm_loss
         self.logger.total_loss.append(total_loss.item())
         total_loss.backward()
 
+        
+        #Run permutation and empty layer check (see paper supplement)
         with torch.no_grad():
-            # xtp -= self.guidance_weight*xtp.grad #/ torch.norm(xtp.grad) # dont normalize because can divide by zero issues
-            xtp -= self.guidance_weight * xtp.grad / (torch.norm(xtp.grad) + 1e-6)
+            permutation_order, idxs_to_remove =  permute_and_clean(t,ti, mask_pred, x0, self.sample_cond,nlayers)
+        
+        
+        with torch.no_grad():
+            xtp -= self.guidance_weight * xtp.grad / (torch.norm(xtp.grad) + 1e-8)
             xtp.grad.zero_()
 
         xtp = xtp.detach()
-        return xtp, permutation_order
+        return xtp,permutation_order, idxs_to_remove
 
     def get_composition(self, x0):
         istensor = torch.is_tensor(x0)
