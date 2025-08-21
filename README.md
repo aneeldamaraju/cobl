@@ -13,7 +13,7 @@ git clone COBL_PUBLIC_PATH
 You may need to edit the torch and xformers settings in the install file to match your own CUDA version. This default file uses CUDA 12.6 and Pytorch 2.7.1, Python 3.10.13
 
 
-## TableTop Real - 20 testing Subset
+## TableTop Dataset
 You can access the Tabletop dataset containing synthetic (train) and real-world (test) scenes by:
 
 (1) Cloning and installing this github repository, then calling:
