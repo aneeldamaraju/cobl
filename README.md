@@ -14,23 +14,19 @@ You may need to edit the torch and xformers settings in the install file to matc
 
 
 ## TableTop Real - 20 testing Subset
-You can access the Tabletop testing set (real-world scenes) by:
+You can access the Tabletop dataset containing synthetic (train) and real-world (test) scenes by:
 
 (1) Cloning and installing this github repository, then calling:
 ```
 from cobl.Tabletop import Tabletop
-test_dat = Tabletop(split="test")
+test_dat = Tabletop(split=SPLIT) # SPLIT = "test" or "train"
 ```
-(2) or without downloading this CoBL Repository, by loading from Huggingface:
+(2) or without downloading this CoBL Repository, by loading from Huggingface Datasets:
 ```
 from datasets import load_dataset
 cobl = load_dataset("DeanHazineh1/CoBL_Tabletop")
-sample = cobl['test'][0]
+sample = cobl[SPLIT][0] # SPLIT = "test" or "train"
 ```
-
-## TableTop Synthetic - Training Subset
-
-Coming Soon!
 
 ## Citation
 
